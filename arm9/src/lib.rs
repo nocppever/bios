@@ -8,6 +8,7 @@ mod crc;
 mod math;
 mod decompress;
 mod memory;
+mod misc;
 use core::panic::PanicInfo;
 
 

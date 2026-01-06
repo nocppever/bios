@@ -72,3 +72,4 @@ pub unsafe extern "C" fn SVC_CpuFastSet(src: *const u32, dst: *mut u32, control:
         }
     }
 }
+

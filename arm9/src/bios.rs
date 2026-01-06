@@ -1,5 +1,4 @@
 // arm9/src/bios_asm.rs
-// VERSION CORRIGÉE : GetCRC16 supprimé, _076C réparé.
 
 use core::arch::global_asm;
 
@@ -207,14 +206,6 @@ _0290:
     pop {{r0, r1, r2, r3, r12, lr}}
     subs pc, lr, #4
 
-    // --- __svc_handler et SVCTable SUPPRIMÉS ICI ---
-
-    .thumb
-    .thumb_func
-SVC_CustomPost: @ 0xFFFF02E4
-    ldr r2, _039C @ =0x04000300
-    str r0, [r2]
-	bx lr
     
     .align 2
 _02EC: .4byte 0x00803EC0
@@ -336,36 +327,7 @@ sub_042A: @ 0xFFFF042A
 
     // --- SVC_GetCRC16 SUPPRIMÉ ICI ---
 
-    .thumb
-    .align 1
-SVC_IsDebugger: @ 0xFFFF048A
-    push {{r4, r5, r6, lr}}
-    ldr r5, _076C @ =DebuggerIdent+8
-    ldr r4, _0770 @ =0x023FFFE0
-    movs r1, #0
-    movs r0, #0
-    ldr r3, _0774 @ =0x027FFFE0
-    subs r5, #8
-_0498:
-    lsls r2, r0, #1
-    ldrh r2, [r5, r2]
-    strh r2, [r3, #0x18]
-    ldrh r6, [r4, #0x18]
-    cmp r6, r2
-    beq _04A6
-    adds r1, #1
-_04A6:
-    adds r0, #1
-    cmp r0, #4
-    blt _0498
-    movs r0, #0
-    strh r0, [r3, #0x18]
-    movs r0, #1
-    cmp r1, #3
-    bhs _04B8
-    movs r0, #0
-_04B8:
-    pop {{r4, r5, r6, pc}}
+   
 
     .thumb
     .align 1
@@ -754,9 +716,6 @@ _075C: .4byte 0x04000300
 _0760: .4byte 0x01000F80
 _0764: .4byte 0x01002000
 _0768: .4byte 0x027F8000
-    // CORRECTION ICI : _076C pointe maintenant vers DebuggerIdent+8
-    // Anciennement : .4byte CRC16Table
-_076C: .4byte DebuggerIdent + 8
 _0770: .4byte 0x023FFFE0
 _0774: .4byte 0x027FFFE0
 
@@ -788,20 +747,9 @@ _07B4: .4byte 0x00002078
 _07B8: .4byte 0x0080000A
 _07BC: .4byte 0x00012078
 
-    .arm
-    .align 2
-    .global SVC_Halt
-SVC_Halt: @ 0xFFFF07C0
-    mov r0, #0
-    mcr p15, #0, r0, c7, c0, #4
-    bx lr
+   
 
-    .thumb
-    .thumb_func
-SVC_WaitByLoop: @ 0xFFFF07CC
-    subs r0, #1
-    bgt SVC_WaitByLoop
-    bx lr
+    
     
     .align 2
 
@@ -847,105 +795,8 @@ sub_0800: @ 0xFFFF0800
     str r0, [r12, #0x208]
     bx lr
 
+
    
-
-
-    .arm
-    .align 2
-SVC_BitUnPack: @ 0xFFFF09C0
-	push {{r4, r5, r6, r7, r8, r9, r10, r11, r12, lr}}
-	sub sp, sp, #8
-	ldrh r7, [r2]
-	ldrb r6, [r2, #2]
-	rsb r10, r6, #8
-	mov lr, #0
-	ldr r11, [r2, #4]
-	lsr r8, r11, #0x1f
-	ldr r11, [r2, #4]
-	lsl r11, r11, #1
-	lsr r11, r11, #1
-	str r11, [sp]
-	ldrb r2, [r2, #3]
-	mov r3, #0
-_09F8:
-	subs r7, r7, #1
-	blt _0A58
-	mov r11, #0xff
-	asr r5, r11, r10
-	ldrb r9, [r0], #1
-	mov r4, #0
-_0A10:
-	cmp r4, #8
-	bge _09F8
-	and r11, r9, r5
-	lsrs r12, r11, r4
-	cmpeq r8, #0
-	beq _0A30
-	ldr r11, [sp]
-	add r12, r12, r11
-_0A30:
-	orr lr, lr, r12, lsl r3
-	add r3, r3, r2
-	cmp r3, #0x20
-	blt _0A4C
-	str lr, [r1], #4
-	mov lr, #0
-	mov r3, #0
-_0A4C:
-	lsl r5, r5, r6
-	add r4, r4, r6
-	b _0A10
-_0A58:
-	add sp, sp, #8
-	pop {{r4, r5, r6, r7, r8, r9, r10, r11, r12, lr}}
-	bx lr
-
-    .arm
-    .align 2
-SVC_LZ77UnCompWRAM: @ 0xFFFF0A64
-	push {{r4, r5, r6, lr}}
-	ldr r5, [r0], #4
-	lsr r2, r5, #8
-_0A70:
-	cmp r2, #0
-	ble _0AF0
-	ldrb lr, [r0], #1
-	mov r4, #8
-_0A80:
-	subs r4, r4, #1
-	blt _0A70
-	tst lr, #0x80
-	bne _0AA4
-	ldrb r6, [r0], #1
-	swpb r6, r6, [r1]
-	add r1, r1, #1
-	sub r2, r2, #1
-	b _0AE0
-_0AA4:
-	ldrb r5, [r0]
-	mov r6, #3
-	add r3, r6, r5, asr #4
-	ldrb r6, [r0], #1
-	and r5, r6, #0xf
-	lsl r12, r5, #8
-	ldrb r6, [r0], #1
-	orr r5, r6, r12
-	add r12, r5, #1
-	sub r2, r2, r3
-_0ACC:
-	ldrb r5, [r1, -r12]
-	swpb r5, r5, [r1]
-	add r1, r1, #1
-	subs r3, r3, #1
-	bgt _0ACC
-_0AE0:
-	cmp r2, #0
-	lslgt lr, lr, #1
-	bgt _0A80
-	b _0A70
-_0AF0:
-	pop {{r4, r5, r6, lr}}
-	bx lr
 
     .thumb
     .align 1
@@ -963,12 +814,7 @@ sub_0B8A: @ 0xFFFF0B8A
 	bx r1
 	@ 0xFFFF0B8C
 
-	.section .rodata
-DebuggerIdent: @ 0xFFFF0B8C
-	.2byte 0x56A9
-	.2byte 0x695A
-	.2byte 0xA695
-	.2byte 0x96A5
+
 
     // CRC16Table SUPPRIMÉE ICI
 

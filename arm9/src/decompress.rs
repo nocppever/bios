@@ -119,3 +119,146 @@ pub unsafe extern "C" fn SVC_RLUnCompWRAM(src: *const u8, dst: *mut u8) {
         }
     }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn SVC_LZ77UnCompWRAM(src: *const u8, dst: *mut u8) {
+    let header = *(src as *const u32);
+    // La taille est sur les 24 bits de poids fort du header
+    let size = (header >> 8) as usize;
+
+    if size == 0 { return; }
+
+    let mut src_ptr = src.add(4); // Saut du header
+    let mut dst_ptr = dst;
+    let mut written = 0;
+
+    while written < size {
+        // Lire un octet de drapeaux (8 blocs)
+        let flags = *src_ptr;
+        src_ptr = src_ptr.add(1);
+
+        // Traiter 8 blocs (ou jusqu'à la fin)
+        for i in (0..8).rev() {
+            if written >= size { break; }
+
+            // Vérifier le bit i (de 7 à 0)
+            if (flags & (1 << i)) == 0 {
+                // Bit = 0 : Octet brut
+                *dst_ptr = *src_ptr;
+                dst_ptr = dst_ptr.add(1);
+                src_ptr = src_ptr.add(1);
+                written += 1;
+            } else {
+                // Bit = 1 : Bloc compressé (référence arrière)
+                // Lire 2 octets :
+                // Byte 1 : (Length - 3) sur 4 bits hauts, (Disp High) sur 4 bits bas
+                // Byte 2 : (Disp Low)
+                let b1 = *src_ptr;
+                let b2 = *src_ptr.add(1);
+                src_ptr = src_ptr.add(2);
+
+                // Calcul de la longueur (3..18) et du déplacement
+                let length = ((b1 >> 4) + 3) as usize;
+                let disp = (((b1 & 0x0F) as usize) << 8) | (b2 as usize);
+
+                // Copier depuis le passé (dst - disp - 1)
+                // Attention : src et dst peuvent se chevaucher si disp est petit (ex: RLE simulé)
+                // On copie donc octet par octet.
+                let mut copy_src = dst_ptr.sub(disp + 1);
+
+                for _ in 0..length {
+                    if written >= size { break; }
+                    *dst_ptr = *copy_src;
+                    dst_ptr = dst_ptr.add(1);
+                    copy_src = copy_src.add(1);
+                    written += 1;
+                }
+            }
+        }
+    }
+}
+
+/// SWI 0x10: BitUnPack
+/// Décompression de bits (Source -> Dest 32-bits).
+/// Utilisé pour convertir des données 1/2/4 bits en valeurs 32 bits.
+/// r0: Source, r1: Dest, r2: Pointeur vers struct UnpackInfo
+#[no_mangle]
+pub unsafe extern "C" fn SVC_BitUnPack(src: *const u8, dst: *mut u32, params: *const UnpackInfo) {
+    // Lecture des paramètres depuis la structure pointée par r2
+    let info = *params;
+    let src_len = info.src_len as usize; // Nombre d'unités à lire
+    let src_width = info.src_width as u32; // Largeur en bits (ex: 1, 2, 4, 8)
+    let dest_width = info.dest_width as u32; // Largeur destination (step dans le mot 32 bits)
+    
+    // Le bit 31 de l'offset est un drapeau "Zero Data Flag"
+    // Si Bit 31 = 1 : On n'ajoute pas l'offset si la donnée source est 0
+    let zero_flag = (info.offset & 0x80000000) != 0;
+    let offset_val = info.offset & 0x7FFFFFFF;
+
+    let mut current_src = src;
+    let mut current_dst = dst;
+    
+    // État de lecture bit-à-bit
+    let mut bit_buffer: u8 = *current_src;
+    current_src = current_src.add(1);
+    let mut bits_available: u32 = 8;
+
+    // Accumulateur pour l'écriture 32 bits
+    let mut dest_acc: u32 = 0;
+    let mut dest_bits_filled: u32 = 0;
+
+    for _ in 0..src_len {
+        // 1. Extraire 'src_width' bits de la source
+        let mut val: u32 = 0;
+        let mut bits_needed = src_width;
+
+        while bits_needed > 0 {
+            if bits_available == 0 {
+                bit_buffer = *current_src;
+                current_src = current_src.add(1);
+                bits_available = 8;
+            }
+
+            let bits_to_take = if bits_available >= bits_needed { bits_needed } else { bits_available };
+            
+            // On prend les bits de poids fort du buffer restant
+            let shift = bits_available - bits_to_take;
+            let mask = (1 << bits_to_take) - 1;
+            let chunk = (bit_buffer >> shift) & mask as u8;
+
+            val = (val << bits_to_take) | (chunk as u32);
+            
+            bits_available -= bits_to_take;
+            bits_needed -= bits_to_take;
+        }
+
+        // 2. Ajouter l'offset (Gestion du Zero Flag)
+        if zero_flag && val == 0 {
+            // Ne rien ajouter
+        } else {
+            val += offset_val;
+        }
+
+        // 3. Placer dans le mot de destination 32 bits
+        dest_acc |= val << dest_bits_filled;
+        dest_bits_filled += dest_width;
+
+        // 4. Si le mot est plein (32 bits), écrire en mémoire
+        if dest_bits_filled >= 32 {
+            *current_dst = dest_acc;
+            current_dst = current_dst.add(1);
+            dest_acc = 0;
+            dest_bits_filled = 0;
+        }
+    }
+}
+
+// Structure des paramètres passée dans r2
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UnpackInfo {
+    pub src_len: u16,    // Nombre d'unités sources
+    pub src_width: u8,   // Largeur bits source (1..8)
+    pub dest_width: u8,  // Largeur bits dest (1..32)
+    pub offset: u32,     // Offset + Flag bit 31
+}

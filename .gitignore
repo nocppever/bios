@@ -1,0 +1,200 @@
+# ============================================
+# Rust Build Artifacts
+# ============================================
+
+# Cargo build directory
+target/
+**/target/
+
+# Cargo lock file (optionnel pour binaires, gardé pour libs)
+# Cargo.lock
+
+# Backup files
+**/*.rs.bk
+**/*.bk
+
+# ============================================
+# BIOS Build Outputs
+# ============================================
+
+# Binaires compilés
+**/*.bin
+**/*.elf
+**/*.o
+**/*.a
+**/*.rlib
+**/*.so
+**/*.dylib
+**/*.dll
+
+# Archives
+**/*.tar.gz
+**/*.zip
+**/*.7z
+
+# Fichiers temporaires de build
+**/*.tmp
+**/temp_*/
+**/temp/
+
+# Output directory
+output/
+**/output/
+
+# ============================================
+# IDE & Editors
+# ============================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ / CLion / RustRover
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+.*.swp
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# OS Files
+# ============================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# Logs & Debug
+# ============================================
+
+# Log files
+*.log
+
+# Debug dumps
+*.dmp
+*.dump
+
+# Core dumps
+core
+core.*
+
+# ============================================
+# Documentation Build
+# ============================================
+
+# Rustdoc output
+doc/
+**/doc/
+
+# Mdbook
+book/
+**/book/
+
+# ============================================
+# Testing & Coverage
+# ============================================
+
+# Test outputs
+*.profraw
+*.profdata
+
+# Coverage reports
+coverage/
+lcov.info
+*.gcda
+*.gcno
+
+# ============================================
+# Dependencies (si vendor/ utilisé)
+# ============================================
+
+# Vendor directory
+# vendor/
+
+# ============================================
+# Project Specific
+# ============================================
+
+# Extracted BIOS for testing
+bios7.bin
+bios9.bin
+firmware.bin
+
+# Temporary extraction folders
+temp_extract/
+temp_analyze/
+temp_gc/
+temp_bios/
+
+# Build scripts temporaires
+build_*.log
+
+# ============================================
+# Security & Secrets
+# ============================================
+
+# Never commit real Nintendo BIOS
+# (keep only open-source versions)
+**/official_bios*.bin
+**/nintendo_*.bin
+**/dumped_*.bin
+
+# API keys, secrets
+.env
+.env.local
+secrets.toml
+
+# ============================================
+# Backup & Archive
+# ============================================
+
+# Backup directories
+backup/
+**/backup/
+
+# Old versions
+*.old
+*.backup
+
+# ============================================
+# KEEP (exceptions)
+# ============================================
+
+# Keep linker scripts
+!**/*.ld
+
+# Keep assembly source (if any)
+!**/*.s
+!**/*.S
+
+# Keep example binaries in specific folders
+# !examples/**/*.bin

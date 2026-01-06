@@ -1,0 +1,22 @@
+[package]
+name = "bios-arm9"
+version = "0.1.0"
+edition = "2021"
+
+# CRITIQUE: Spécifier que c'est une LIB, pas un binaire
+[lib]
+name = "bios9"
+crate-type = ["staticlib"]
+
+# Pas de binaire
+# (Ne pas mettre [[bin]])
+
+[profile.release]
+opt-level = "z"          # Optimiser pour la taille
+lto = true               # Link-time optimization
+codegen-units = 1        # Single codegen unit pour meilleure optimisation
+panic = "abort"          # Pas d'unwinding
+strip = true             # Strip symbols
+
+[dependencies]
+# Pas de dépendances (bare metal)

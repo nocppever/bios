@@ -1,61 +1,121 @@
-//! Decompression Functions
-//! 
-//! LZ77 decompression implementation compatible with BIOS SWI 0x11.
+// arm9/src/decompress.rs
+// Implémentation des algorithmes de décompression (SWI 0x14, 0x16, 0x18)
 
+/// SWI 0x16: Diff8UnFilter
+/// Applique un filtre différentiel 8-bits (chaque octet est la somme du précédent et de la valeur lue).
+/// r0: Source (Header inclus), r1: Destination
 #[no_mangle]
-pub unsafe extern "C" fn swi_lz77_wram(source: *const u8, dest: *mut u8) {
-    // Lecture de l'en-tête (32 bits)
-    // Bits 0-3: Réservé
-    // Bits 4-7: Type de compression (doit être 1 pour LZ77)
-    // Bits 8-31: Taille décompressée
-    let header = *(source as *const u32);
-    let decompressed_size = header >> 8;
+pub unsafe extern "C" fn SVC_Diff8UnFilter(src: *const u8, dst: *mut u8) {
+    // Lecture du header (32 bits)
+    // Le header contient la taille sur 24 bits (>> 8)
+    let header = *(src as *const u32);
+    let count = (header >> 8) as usize;
+
+    let mut current_src = src.add(4); // On saute le header
+    let mut current_dst = dst;
     
-    let mut src_offset = 4; // On commence après l'en-tête
-    let mut dst_offset = 0;
+    // Le BIOS lit d'abord la valeur initiale
+    let mut accumulator: u8 = *current_src;
+    current_src = current_src.add(1);
     
-    while dst_offset < decompressed_size {
-        // Lecture du byte de flags (8 indicateurs pour les 8 prochains blocs)
-        let flags = *source.add(src_offset);
-        src_offset += 1;
+    *current_dst = accumulator;
+    current_dst = current_dst.add(1);
+
+    // Boucle principale
+    // Note: count est le nombre total d'octets, on en a déjà traité 1
+    for _ in 0..(count - 1) {
+        let val = *current_src;
+        current_src = current_src.add(1);
+
+        // L'addition doit wrapper (déborder silencieusement)
+        accumulator = accumulator.wrapping_add(val);
         
-        for i in (0..8).rev() {
-            if dst_offset >= decompressed_size {
-                break;
+        *current_dst = accumulator;
+        current_dst = current_dst.add(1);
+    }
+}
+
+/// SWI 0x18: Diff16UnFilter
+/// Applique un filtre différentiel 16-bits.
+/// r0: Source (Header inclus), r1: Destination
+#[no_mangle]
+pub unsafe extern "C" fn SVC_Diff16UnFilter(src: *const u8, dst: *mut u8) {
+    let header = *(src as *const u32);
+    let count = (header >> 8) as usize; // Nombre d'octets total
+
+    let mut current_src = src.add(4) as *const u16;
+    let mut current_dst = dst as *mut u16;
+    
+    // On travaille par mots de 16 bits, donc on divise count par 2
+    let count_u16 = count / 2;
+
+    let mut accumulator: u16 = *current_src;
+    current_src = current_src.add(1);
+    
+    *current_dst = accumulator;
+    current_dst = current_dst.add(1);
+
+    for _ in 0..(count_u16 - 1) {
+        let val = *current_src;
+        current_src = current_src.add(1);
+
+        accumulator = accumulator.wrapping_add(val);
+        
+        *current_dst = accumulator;
+        current_dst = current_dst.add(1);
+    }
+}
+
+/// SWI 0x14: RLUnCompWRAM
+/// Décompression Run-Length (RLE) vers la WRAM (écriture 8-bits autorisée).
+/// r0: Source, r1: Destination
+#[no_mangle]
+pub unsafe extern "C" fn SVC_RLUnCompWRAM(src: *const u8, dst: *mut u8) {
+    let header = *(src as *const u32);
+    // Taille décompressée sur 24 bits
+    let mut remaining_len = (header >> 8) as usize;
+
+    let mut current_src = src.add(4);
+    let mut current_dst = dst;
+
+    if remaining_len == 0 {
+        return;
+    }
+
+    while remaining_len > 0 {
+        // Lire le byte de drapeau
+        let flag_byte = *current_src;
+        current_src = current_src.add(1);
+
+        // Bit 7 : Type (0 = Non compressé, 1 = Compressé)
+        let compressed = (flag_byte & 0x80) != 0;
+        // Bits 0-6 : Compte (nombre d'octets à traiter - voir spec)
+        // La spec dit : count = (flag & 0x7F) + N
+        // Pour copy (raw) : N=1, donc count = flag + 1
+        // Pour compressed (rle) : N=3, donc count = flag + 3
+        let count_bits = (flag_byte & 0x7F) as usize;
+
+        if compressed {
+            // RLE: Lire 1 octet et le répéter (count + 3) fois
+            let run_len = count_bits + 3;
+            let val = *current_src;
+            current_src = current_src.add(1);
+
+            for _ in 0..run_len {
+                *current_dst = val;
+                current_dst = current_dst.add(1);
             }
+            remaining_len -= run_len;
+        } else {
+            // RAW: Copier (count + 1) octets tels quels
+            let copy_len = count_bits + 1;
             
-            // Si le bit est 0 : Copie brute (Literal)
-            // Si le bit est 1 : Donnée compressée (LZ77 tuple)
-            if (flags & (1 << i)) == 0 {
-                *dest.add(dst_offset as usize) = *source.add(src_offset);
-                dst_offset += 1;
-                src_offset += 1;
-            } else {
-                // Lecture de 2 octets pour la longueur et la distance
-                let byte1 = *source.add(src_offset) as u32;
-                let byte2 = *source.add(src_offset + 1) as u32;
-                src_offset += 2;
-                
-                // Format:
-                // byte1 (high 4): Length - 3 (MSB)
-                // byte1 (low 4): Disp MSB
-                // byte2: Disp LSB
-                
-                let length = (byte1 >> 4) + 3;
-                let disp = ((byte1 & 0x0F) << 8) | byte2;
-                
-                // Copie depuis le buffer de sortie (fenêtre glissante)
-                let copy_src = dst_offset - disp - 1;
-                
-                for k in 0..length {
-                    if dst_offset >= decompressed_size {
-                        break;
-                    }
-                    let val = *dest.add((copy_src + k) as usize);
-                    *dest.add(dst_offset as usize) = val;
-                    dst_offset += 1;
-                }
+            for _ in 0..copy_len {
+                *current_dst = *current_src;
+                current_src = current_src.add(1);
+                current_dst = current_dst.add(1);
             }
+            remaining_len -= copy_len;
         }
     }
 }

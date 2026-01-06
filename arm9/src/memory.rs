@@ -1,111 +1,74 @@
-//! Memory Manipulation Functions (SWI 0x0B & 0x0C)
+// arm9/src/memory.rs
+// Implémentation des SWI 0x0B (CpuSet) et 0x0C (CpuFastSet)
 
+/// SWI 0x0B: CpuSet
+/// Copie ou remplit la mémoire par blocs de 16 ou 32 bits.
+/// r0: Source, r1: Dest, r2: Control
+/// Control:
+/// - Bit 0-20: Compte (nombre d'unités à transférer)
+/// - Bit 24:   Mode Source (0 = Incrément, 1 = Fixe)
+/// - Bit 26:   Taille (0 = 16-bit, 1 = 32-bit)
 #[no_mangle]
-#[unsafe(naked)]
-pub unsafe extern "C" fn cpu_set_impl() {
-    // r0 = source, r1 = dest, r2 = control
-    // Control bit 24: 1=Fixed Source (Fill), 0=Copy
-    // Control bit 26: 1=32bit, 0=16bit
-    // Control 0-20: Count
-    core::arch::naked_asm!(
-        "stmfd sp!, {{r4-r6, lr}}", // Sauvegarde registres
-        
-        "mov r3, r2, lsr #24",      // r3 = Flags (bits 24+)
-        "bic r2, r2, #0xFF000000",  // r2 = Count (bits 0-20) only
-        
-        "tst r3, #4",               // Test bit 26 (32-bit mode?)
-        "bne 2f",                   // Si 1, aller vers 32-bit (label 2)
+pub unsafe extern "C" fn SVC_CpuSet(src: *const u8, dst: *mut u8, control: u32) {
+    let count = (control & 0x1FFFFF) as usize;
+    let fixed_source = (control & (1 << 24)) != 0;
+    let size_32 = (control & (1 << 26)) != 0;
 
-        // --- 16-bit Mode ---
-        "tst r3, #1",               // Test bit 24 (Fixed source?)
-        "bne 1f",                   // Si 1, aller vers Fill (label 1)
-
-        // 16-bit Copy
-        "0:",
-        "ldrh r4, [r0], #2",        // Load halfword & inc src
-        "strh r4, [r1], #2",        // Store halfword & inc dst
-        "subs r2, r2, #1",
-        "bne 0b",
-        "ldmfd sp!, {{r4-r6, pc}}",
-
-        // 16-bit Fill
-        "1:",
-        "ldrh r4, [r0]",            // Load source une seule fois
-        "3:",
-        "strh r4, [r1], #2",
-        "subs r2, r2, #1",
-        "bne 3b",
-        "ldmfd sp!, {{r4-r6, pc}}",
-
-        // --- 32-bit Mode ---
-        "2:", 
-        "tst r3, #1",               // Test bit 24 (Fixed source?)
-        "bne 4f",                   // Si 1, aller vers Fill (label 4)
-
-        // 32-bit Copy
-        "5:",
-        "ldr r4, [r0], #4",
-        "str r4, [r1], #4",
-        "subs r2, r2, #1",
-        "bne 5b",
-        "ldmfd sp!, {{r4-r6, pc}}",
-
-        // 32-bit Fill
-        "4:",
-        "ldr r4, [r0]",             // Load source une seule fois
-        "6:",
-        "str r4, [r1], #4",
-        "subs r2, r2, #1",
-        "bne 6b",
-        "ldmfd sp!, {{r4-r6, pc}}",
-    )
+    if size_32 {
+        let s = src as *const u32;
+        let d = dst as *mut u32;
+        if fixed_source {
+            // Mode "Fill" (Source fixe 32-bit)
+            let val = *s;
+            for i in 0..count {
+                *d.add(i) = val;
+            }
+        } else {
+            // Mode "Copy" (32-bit)
+            // On utilise une boucle simple pour éviter les dépendances externes lourdes
+            for i in 0..count {
+                *d.add(i) = *s.add(i);
+            }
+        }
+    } else {
+        let s = src as *const u16;
+        let d = dst as *mut u16;
+        if fixed_source {
+            // Mode "Fill" (Source fixe 16-bit)
+            let val = *s;
+            for i in 0..count {
+                *d.add(i) = val;
+            }
+        } else {
+            // Mode "Copy" (16-bit)
+            for i in 0..count {
+                *d.add(i) = *s.add(i);
+            }
+        }
+    }
 }
 
+/// SWI 0x0C: CpuFastSet
+/// Copie ou remplit la mémoire par blocs de 32 bits (toujours x32).
+/// Optimisé pour les gros transferts (doit être aligné sur 4 octets).
+/// r0: Source, r1: Dest, r2: Control
 #[no_mangle]
-#[unsafe(naked)]
-pub unsafe extern "C" fn cpu_fast_set_impl() {
-    // r0 = source, r1 = dest, r2 = control
-    // FastSet copie toujours par blocs de 32 octets (8 mots de 32 bits)
-    // C'est souvent utilisé pour copier la VRAM.
-    core::arch::naked_asm!(
-        "stmfd sp!, {{r4-r10, lr}}",
-        
-        "mov r3, r2, lsr #24",      // Flags
-        "bic r2, r2, #0xFF000000",  // Count (nombre de WORDS)
-        
-        // FastSet attend un compte multiple de 8. Divisons par 8 pour compter les blocs.
-        "mov r2, r2, lsr #3",       
-        "cmp r2, #0",
-        "beq 9f",                   // Si count=0, on sort
+pub unsafe extern "C" fn SVC_CpuFastSet(src: *const u32, dst: *mut u32, control: u32) {
+    let count = (control & 0x1FFFFF) as usize;
+    let fixed_source = (control & (1 << 24)) != 0;
 
-        "tst r3, #1",               // Fixed source (Fill) ?
-        "bne 2f",
-
-        // --- Copy Mode (8 words par boucle) ---
-        "1:",
-        "ldmia r0!, {{r3-r10}}",    // Charge 8 mots (32 octets) depuis src
-        "stmia r1!, {{r3-r10}}",    // Écrit 8 mots vers dest
-        "subs r2, r2, #1",
-        "bne 1b",
-        "ldmfd sp!, {{r4-r10, pc}}",
-
-        // --- Fill Mode (8 words par boucle) ---
-        "2:",
-        "ldr r3, [r0]",             // Charge la valeur source UNE FOIS
-        "mov r4, r3",               // Duplique dans tous les registres
-        "mov r5, r3",
-        "mov r6, r3",
-        "mov r7, r3",
-        "mov r8, r3",
-        "mov r9, r3",
-        "mov r10, r3",
-        
-        "3:",
-        "stmia r1!, {{r3-r10}}",    // Écrit 8 fois la même valeur
-        "subs r2, r2, #1",
-        "bne 3b",
-
-        "9:",
-        "ldmfd sp!, {{r4-r10, pc}}",
-    )
+    if fixed_source {
+        // Mode "Fill" rapide
+        let val = *src;
+        for i in 0..count {
+            *dst.add(i) = val;
+        }
+    } else {
+        // Mode "Copy" rapide
+        // Le BIOS original utilise des instructions LDM/STM (blocs de 32 octets)
+        // Ici, une boucle simple suffit car le compilateur peut la vectoriser/optimiser
+        for i in 0..count {
+            *dst.add(i) = *src.add(i);
+        }
+    }
 }

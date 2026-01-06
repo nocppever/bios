@@ -1,4 +1,4 @@
-# build-FINAL.ps1 - Solution qui marche vraiment
+# build-FINAL-V2.ps1 - Correction des chemins absolus pour .NET
 
 Write-Host ""
 Write-Host "=== Build BIOS ARM9 ===" -ForegroundColor Cyan
@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "   OK" -ForegroundColor Green
 Write-Host ""
 
-# 2. Extraire l'archive et linker manuellement
+# 2. Extraire l'archive
 $archive = "..\target\armv5te-none-eabi\release\libbios9.a"
 
 if (-not (Test-Path $archive)) {
@@ -27,14 +27,14 @@ Write-Host "2. Archive trouvee" -ForegroundColor Yellow
 Write-Host "   $archive" -ForegroundColor Gray
 Write-Host ""
 
-# 3. Trouver les outils
+# 3. Outils
 $sysroot = rustc +nightly --print sysroot
 $binDir = "$sysroot\lib\rustlib\x86_64-pc-windows-msvc\bin"
 $ar = "$binDir\llvm-ar.exe"
 $linker = "$binDir\rust-lld.exe"
 $objcopy = "$binDir\llvm-objcopy.exe"
 
-# 4. Extraire l'archive
+# 4. Extraction
 Write-Host "3. Extraction de l'archive..." -ForegroundColor Yellow
 
 $tmpDir = "temp_bios"
@@ -43,7 +43,6 @@ if (Test-Path $tmpDir) {
 }
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
-# Copier l'archive dans temp et extraire
 Copy-Item $archive "$tmpDir\libbios9.a"
 Push-Location $tmpDir
 & $ar x libbios9.a
@@ -53,26 +52,27 @@ $objects = Get-ChildItem $tmpDir -Filter "*.o"
 Write-Host "   $($objects.Count) objets extraits" -ForegroundColor Green
 Write-Host ""
 
-# 5. Linker tous les objets
+# 5. Linkage
 Write-Host "4. Linkage..." -ForegroundColor Yellow
 
-$outDir = "..\output"
-if (-not (Test-Path $outDir)) {
-    New-Item -ItemType Directory -Path $outDir | Out-Null
+$outDirRel = "..\output"
+if (-not (Test-Path $outDirRel)) {
+    New-Item -ItemType Directory -Path $outDirRel | Out-Null
 }
+# --- CORRECTION CRITIQUE : Conversion en chemin absolu ---
+$outDir = (Resolve-Path $outDirRel).Path 
 
 $elf = "$outDir\bios9.elf"
 
-# Créer la liste des objets
 $objectList = @()
 foreach ($obj in $objects) {
     $objectList += "$tmpDir\$($obj.Name)"
 }
 
-# Linker avec le script
 $ldArgs = @(
     "-flavor", "gnu",
     "-T", "arm9bios.ld",
+    "--gc-sections",
     "-o", $elf
 ) + $objectList
 
@@ -86,11 +86,10 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "   OK ELF cree" -ForegroundColor Green
 
-# Nettoyer temp
 Remove-Item -Recurse -Force $tmpDir
 Write-Host ""
 
-# 6. Extraire le binaire
+# 6. Extraction binaire
 Write-Host "5. Extraction binaire..." -ForegroundColor Yellow
 
 $tmp = "$outDir\bios9.tmp"
@@ -109,9 +108,10 @@ if (-not (Test-Path $tmp)) {
 Write-Host "   OK" -ForegroundColor Green
 Write-Host ""
 
-# 7. Padder
+# 7. Padding
 Write-Host "6. Padding..." -ForegroundColor Yellow
 
+# Maintenant $tmp est un chemin absolu, donc .NET le trouvera
 $content = [System.IO.File]::ReadAllBytes($tmp)
 $size = $content.Length
 
@@ -138,13 +138,13 @@ Write-Host "   OK 4096 bytes" -ForegroundColor Green
 Write-Host "   Code: $size bytes, Libre: $(4096 - $size) bytes" -ForegroundColor Gray
 Write-Host ""
 
-# 8. Header
+# 8. Verification
 $header = [System.IO.File]::ReadAllBytes($final) | Select-Object -First 16
 $hex = ($header | ForEach-Object { $_.ToString("X2") }) -join " "
 Write-Host "   Header: $hex" -ForegroundColor Gray
 Write-Host ""
 
-# 9. Installer
+# 9. Installation
 Write-Host "7. Installation..." -ForegroundColor Yellow
 
 $biosDir = "..\core\bios"
@@ -156,9 +156,4 @@ Copy-Item $final "$biosDir\bios9.bin" -Force
 
 Write-Host "   OK" -ForegroundColor Green
 Write-Host ""
-
-Write-Host "=== BUILD TERMINE ===" -ForegroundColor Green
-Write-Host ""
-Write-Host "Fichier cree: $biosDir\bios9.bin" -ForegroundColor Cyan
-Write-Host "Taille: 4096 bytes (Code: $size, Libre: $(4096-$size))" -ForegroundColor Gray
-Write-Host ""
+Write-Host "=== SUCCES ===" -ForegroundColor Green

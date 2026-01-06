@@ -1,6 +1,6 @@
 [unstable]
 build-std = ["core"]
-build-std-features = ["compiler-builtins-mem"]
+# SUPPRIMEZ CETTE LIGNE : build-std-features = ["compiler-builtins-mem"]
 
 [build]
 target = "armv5te-none-eabi"
@@ -14,4 +14,6 @@ rustflags = [
     "-C", "lto=fat",
     "-C", "codegen-units=1",
     "-C", "panic=abort",
+    # AJOUTEZ CECI POUR FORCER LE NETTOYAGE DU CODE INUTILE :
+    "-C", "link-arg=--gc-sections", 
 ]
